@@ -10,10 +10,54 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 import math
 import inspect
 from dataclasses import dataclass
+import time
+from collections import defaultdict
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+class Profiler:
+    def __init__(self):
+        self.times = defaultdict(list)
+        self.current_iteration = defaultdict(float)
+    
+    def scope(self, name):
+        return ProfilerScope(self, name)
+    
+    def record(self, name, time_taken):
+        self.times[name].append(time_taken)
+    
+    def get_summary(self):
+        summary = {}
+        for name, times in self.times.items():
+            if times:
+                summary[f"{name}_time_avg"] = sum(times) / len(times)
+                summary[f"{name}_time_total"] = sum(times)
+                summary[f"{name}_calls"] = len(times)
+        return summary
+    
+    def clear(self):
+        self.times.clear()
+
+class ProfilerScope:
+    def __init__(self, profiler, name):
+        self.profiler = profiler
+        self.name = name
+    
+    def __enter__(self):
+        self.start_time = time.time()
+        return self
+    
+    def __exit__(self, *args):
+        time_taken = time.time() - self.start_time
+        self.profiler.record(self.name, time_taken)
+
+profiler = Profiler()
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -24,7 +68,9 @@ class LayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
 
     def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+        with profiler.scope('layer_norm_total'):
+            y = F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+        return y
 
 class CausalSelfAttention(nn.Module):
 
@@ -48,32 +94,38 @@ class CausalSelfAttention(nn.Module):
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
-
+        
     def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        with profiler.scope("attention_total"):
+            B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+            with profiler.scope("attention_qkv_proj"):
+                q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+            with profiler.scope("attention_reshape"):
+                k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+                q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+                v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        if self.flash:
-            # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
-        else:
-            # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+            # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+            with profiler.scope("attention_compute"):
+                if self.flash:
+                    # efficient attention using Flash Attention CUDA kernels
+                    y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+                else:
+                    # manual implementation of attention
+                    att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+                    att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+                    att = F.softmax(att, dim=-1)
+                    att = self.attn_dropout(att)
+                    y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+            with profiler.scope("attention_output_reassemble"):
+                y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
-        # output projection
-        y = self.resid_dropout(self.c_proj(y))
+                # output projection
+                y = self.resid_dropout(self.c_proj(y))
         return y
+
 
 class MLP(nn.Module):
 
@@ -85,10 +137,15 @@ class MLP(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
-        x = self.c_proj(x)
-        x = self.dropout(x)
+        with profiler.scope("mlp_total"):
+            with profiler.scope("mlp_fc1"):
+                x = self.c_fc(x)
+            with profiler.scope("mlp_activation"):
+                x = self.gelu(x)
+            with profiler.scope("mlp_fc2"):
+                x = self.c_proj(x)
+            with profiler.scope("mlp_dropout"):
+                x = self.dropout(x)
         return x
 
 class Block(nn.Module):
@@ -101,9 +158,20 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
-        return x
+        with profiler.scope("block_total"):
+            with profiler.scope("block_layernorm1"):
+                ln1_out = self.ln_1(x)
+            with profiler.scope("block_attention"):
+                attn_out = self.attn(ln1_out)
+            with profiler.scope("block_residual1"):
+                x = x + attn_out
+            with profiler.scope("block_layernorm2"):
+                ln2_out = self.ln_2(x)
+            with profiler.scope("block_mlp"):
+                mlp_out = self.mlp(ln2_out)
+            with profiler.scope("block_residual2"):
+                x = x + mlp_out
+            return x
 
 @dataclass
 class GPTConfig:
@@ -171,24 +239,30 @@ class GPT(nn.Module):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
+        with profiler.scope("forward_total"):
+            with profiler.scope("embedding"):
+                pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
-        # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
-        for block in self.transformer.h:
-            x = block(x)
-        x = self.transformer.ln_f(x)
+                # forward the GPT model itself
+                tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
+                pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
+                x = self.transformer.drop(tok_emb + pos_emb)
+            with profiler.scope("transformer_blocks"):
+                for block in self.transformer.h:
+                    x = block(x)
+            with profiler.scope("final_layernorm"):
+                x = self.transformer.ln_f(x)
 
-        if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
-            loss = None
+            with profiler.scope("output_head"):
+                if targets is not None:
+                    # if we are given some desired targets also calculate the loss
+                    logits = self.lm_head(x)
+                    with profiler.scope("loss_calculation"):
+                        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+                else:
+                    # inference-time mini-optimization: only forward the lm_head on the very last position
+                    logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+                    loss = None
 
         return logits, loss
 
@@ -275,14 +349,14 @@ class GPT(nn.Module):
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        #print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        #print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
+        #print(f"using fused AdamW: {use_fused}")
 
         return optimizer
 
