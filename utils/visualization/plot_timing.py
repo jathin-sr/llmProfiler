@@ -71,7 +71,7 @@ def create_smart_pie_chart(ax, sizes, labels, colors, threshold=10):
 
 def plot_component_timing_breakdown(df, save_path=None):
     """
-    Plot 4: Component Timing Breakdown
+    Plot 7: Component Timing Breakdown
     Detailed analysis of forward/backward/optimizer timing distributions using actual measurements
     """
     # Focus on representative configurations

@@ -12,7 +12,7 @@ df, latest_file = load_latest_results()
 
 def plot_energy_vs_batch_size(df, save_path=None):
     """
-    Plot 2A-1: Energy consumption across batch sizes with double bars
+    Plot 2A: Energy consumption across batch sizes with double bars
     """
     # Focus on one representative model size
     plot_data = df[
@@ -95,7 +95,7 @@ def plot_energy_vs_batch_size(df, save_path=None):
 
 def plot_energy_vs_block_size(df, save_path=None):
     """
-    Plot 2A-2: Energy consumption across block sizes with double bars
+    Plot 2B: Energy consumption across block sizes with double bars
     """
     # Focus on one representative model size
     plot_data = df[
@@ -178,7 +178,7 @@ def plot_energy_vs_block_size(df, save_path=None):
 
 def plot_energy_vs_model_architecture(df, save_path=None):
     """
-    Plot 2A-3: Energy consumption across model architectures with double bars
+    Plot 2C: Energy consumption across model architectures with double bars
     """
     # Focus on one representative batch size
     plot_data = df[

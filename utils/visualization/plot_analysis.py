@@ -14,7 +14,6 @@ def plot_batch_size_memory_vs_compute_bound_analysis(df, save_path=None):
     Plot 6A: Memory-bound vs Compute-bound Analysis for Batch Size
     Analyzes how batch size affects performance differently on CPU vs MPS
     """
-    
     # Focus on one representative model size across different batch sizes
     plot_data = df[
         (df['n_layer'] == 4) & 

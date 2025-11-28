@@ -9,9 +9,9 @@ import utils.plot_helper as plot_helper
 load_latest_results = plot_helper.load_latest_results
 df, latest_file = load_latest_results()
 
-def plot_power_vs_batch_size_enhanced(df, save_path=None):
+def plot_power_vs_batch_size(df, save_path=None):
     """
-    Enhanced Plot 1A: Power composition across batch sizes with proper grouped labeling
+    Plot 1A: Power composition across batch sizes with proper grouped labeling
     """
     # Focus on one representative model size
     plot_data = df[
@@ -140,9 +140,9 @@ def plot_power_vs_batch_size_enhanced(df, save_path=None):
 
     return fig
 
-def plot_power_vs_block_size_enhanced(df, save_path=None):
+def plot_power_vs_block_size(df, save_path=None):
     """
-    Enhanced Plot 1B: Power composition across block sizes with proper grouped labeling
+    Plot 1B: Power composition across block sizes with proper grouped labeling
     """
     # Focus on one representative model size
     plot_data = df[
@@ -271,9 +271,9 @@ def plot_power_vs_block_size_enhanced(df, save_path=None):
 
     return fig
 
-def plot_power_vs_model_architecture_enhanced(df, save_path=None):
+def plot_power_vs_model_arch(df, save_path=None):
     """
-    Enhanced Plot 1C: Power composition across model architectures with proper grouped labeling
+    Plot 1C: Power composition across model architectures with proper grouped labeling
     """
     # Focus on one representative batch size
     plot_data = df[
@@ -407,6 +407,6 @@ def plot_power_vs_model_architecture_enhanced(df, save_path=None):
 
     return fig
     
-fig_1a = plot_power_vs_batch_size_enhanced(df, save_path='results/plot_1a_power_vs_batch_size.png')
-fig_1b = plot_power_vs_block_size_enhanced(df, save_path='results/plot_1b_power_vs_block_size.png')
-fig_1c = plot_power_vs_model_architecture_enhanced(df, save_path='results/plot_1c_power_vs_model_arch.png')
+fig_1a = plot_power_vs_batch_size(df, save_path='results/plot_1a_power_vs_batch_size.png')
+fig_1b = plot_power_vs_block_size(df, save_path='results/plot_1b_power_vs_block_size.png')
+fig_1c = plot_power_vs_model_arch(df, save_path='results/plot_1c_power_vs_model_arch.png')
