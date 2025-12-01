@@ -64,7 +64,7 @@ Now lets look at this rarad plot which shows for each of the sub-parameter confi
 Now lets look at the computaitonal energy efficiency metric FLOPs/watt, which is ideal to optimise. The trend shows that for mdeium batch sizes we attain better computaitonal energy efficiency is seen in the plot which is something I'm yet to understand why and will include in the future works.
 ![llmProfiler](results/plot_4a_flops_per_watt_vs_batch_size.png)
 
-**Note:**  There are several other trends plotted which can be checked in the results folder. To keep the readMe compact only a few are shown here.
+**Note:**  There are several other trends plotted which can be checked in the [results](https://github.com/jathin-sr/llmProfiler/tree/master/results) folder. To keep the readMe compact only a few are shown here.
 
 ## future works
 - Investigate and understand why medium batch sizes get better FLOPs/watt
